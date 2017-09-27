@@ -2,6 +2,7 @@
 #define AFINA_ALLOCATOR_SIMPLE_H
 
 #include <string>
+#include <cstring>
 
 namespace Afina {
 namespace Allocator {
@@ -16,6 +17,20 @@ class Pointer;
  */
 // TODO: Implements interface to allow usage as C++ allocators
 class Simple {
+private:
+    void* base;
+    size_t size;
+    struct FreeBlock {
+        size_t size;
+        FreeBlock* next; // next free block
+    };
+    FreeBlock* freeBlocksHead;
+    static const size_t lastBlockSize = 0;
+    void* descriptor;
+    size_t nDescriptors;
+    void updateDescriptor(void* old_ptr, void* new_ptr);
+    void findSurroundingBlocks(void* ptr, void* before, void* after);
+
 public:
     Simple(void *base, size_t size);
 

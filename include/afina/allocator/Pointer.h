@@ -8,16 +8,17 @@ namespace Allocator {
 class Simple;
 
 class Pointer {
+    void** ptr;
 public:
     Pointer();
-
+    Pointer(void**);
     Pointer(const Pointer &);
     Pointer(Pointer &&);
 
     Pointer &operator=(const Pointer &);
     Pointer &operator=(Pointer &&);
 
-    void *get() const { return 0; }
+    void *get() const { return ptr != nullptr ? *ptr : nullptr; }
 };
 
 } // namespace Allocator
