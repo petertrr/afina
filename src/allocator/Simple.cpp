@@ -20,6 +20,7 @@ Simple::Simple(void *base, size_t size) :
     freeBlocksHead->size = size - lastBlockSize - nDescriptors * sizeof(void*);
     freeBlocksHead->next = nullptr;
 }
+//Simple::Simple(void *base, size_t size) : _base(base), _base_len(size) {}
 
 /**
  * @param N size_t
