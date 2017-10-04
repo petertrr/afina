@@ -2,6 +2,8 @@
 #include <iostream>
 #include <memory>
 #include <uv.h>
+#include <fstream>
+#include <unistd.h>
 
 #include <cxxopts.hpp>
 
@@ -49,11 +51,32 @@ int main(int argc, char **argv) {
         options.add_options()("s,storage", "Type of storage service to use", cxxopts::value<std::string>());
         options.add_options()("n,network", "Type of network service to use", cxxopts::value<std::string>());
         options.add_options()("h,help", "Print usage info");
+        options.add_options()("d,daemon", "Run server as a daemon");
+        options.add_options()("p,pid", "Write PID to file", cxxopts::value<std::string>());
         options.parse(argc, argv);
 
         if (options.count("help") > 0) {
             std::cerr << options.help() << std::endl;
             return 0;
+        }
+        if( options.count("daemon") > 0 ) {
+            pid_t p = fork();
+            if( p == 0 ) {
+                setsid();
+                close(STDIN_FILENO);
+                close(STDOUT_FILENO);
+                close(STDERR_FILENO);
+            } else {
+                return 0;
+            }
+        }
+        if( options.count("pid") > 0 ) {
+            std::string filename = options["pid"].as<std::string>();
+            pid_t pid = getpid();
+            std::ofstream fout;
+            fout.open(filename.c_str());
+            fout << pid;
+            fout.close();
         }
     } catch (cxxopts::OptionParseException &ex) {
         std::cerr << "Error: " << ex.what() << std::endl;
