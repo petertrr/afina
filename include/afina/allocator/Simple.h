@@ -7,6 +7,10 @@
 
 namespace Afina {
 namespace Allocator {
+    
+// TODO
+// проверка минимального размера аллокации - done!
+// проверка не занята ли память под нновый дескриптор, если занята - делать дефрагментацию
 
 // Forward declaration. Do not include real class definition
 // to avoid expensive macros calculations and increase compile speed

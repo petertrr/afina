@@ -26,10 +26,13 @@ Simple::Simple(void *base, size_t size) :
  * @param N size_t
  */
 Pointer Simple::alloc(size_t N) {
+    // check minimal allocation size - after dealloc we should be able
+    // to create a FreeBlock struct in this memory
+    if( N < sizeof(FreeBlock) )
+        N = sizeof(FreeBlock);
     FreeBlock* prevBlock = nullptr;
     FreeBlock* curBlock = freeBlocksHead;
     // searching among free blocks for the one with proper size
-    bool a = false;
     while( curBlock != nullptr )
     {
         if( curBlock->size >= N ) {
@@ -55,50 +58,72 @@ Pointer Simple::alloc(size_t N) {
         }
         if( curBlock == nullptr )*/
         throw AllocError(AllocErrorType::NoMemory, "No memory");
-    } else if( prevBlock == nullptr ) {
-        // first free block is getting allocated
-        if( curBlock->next != nullptr ) {
-            freeBlocksHead = curBlock->next; 
-        } else {
-            freeBlocksHead = (FreeBlock*)((char*)curBlock + N);
-            freeBlocksHead->size = curBlock->size - N;
-            freeBlocksHead->next = nullptr;  // here curBlock->next == nullptr
-        }
     } else {
-        if( curBlock->size == N ) {
-            prevBlock->next = curBlock->next;
-        } else {
-            FreeBlock* newBlock = (FreeBlock*)((char*)curBlock + N);
-            newBlock->size = curBlock->size - N;
-            newBlock->next = curBlock->next;
-            prevBlock->next = newBlock;
+        // try to add new descriptor
+        static int defragDone = 0;
+        // find free cell among descriptors
+        void* new_desc = descriptor;  // start from last descriptor
+        bool enlargeTable = false;
+        for(size_t i = 0; i < nDescriptors; ++i)
+        {
+            if( *(void**)new_desc == nullptr )
+                break;
+            else
+                new_desc = (void*)((char*)new_desc - sizeof(void*));
+            if( i == nDescriptors - 1 )
+                enlargeTable = true;
         }
-    }
+        FreeBlock* lastBlock;
+        if( enlargeTable ) {
+            // find the last free block
+            FreeBlock* lastBlock = freeBlocksHead;
+            while( lastBlock->next != nullptr )
+                lastBlock = lastBlock->next;
+            // check if there is no occupied blocks between lastBlock and desc table
+            if( (char*)lastBlock + lastBlock->size < (char*)new_desc ) {
+                if( defragDone % 2 == 0 ) {
+                    defrag();
+                    defragDone = (defragDone + 1) % 2;
+                    return alloc(N);
+                } else {
+                    throw AllocError(AllocErrorType::NoMemory, "No memory");
+                }
+            }
+        }
 
-    // add new descriptor
-    // find free cell among descriptors
-    void* new_desc = descriptor;  // start from last descriptor
-    bool enlargeTable = false;
-    for(size_t i = 0; i < nDescriptors; ++i)
-    {
-        if( *(void**)new_desc == nullptr )
-            break;
-        else
-            new_desc = (void*)((char*)new_desc - sizeof(void*));
-        if( i == nDescriptors - 1 )
-            enlargeTable = true;
-    }
-    nDescriptors++;
-    *((void**)new_desc) = (void*)((char**)curBlock);
-    if( enlargeTable ) {
-        // decrease last block size by size of one descriptor
-        FreeBlock* lastBlock = freeBlocksHead;
-        while( lastBlock->next != nullptr )
+        if( prevBlock == nullptr ) {
+            // first free block is getting allocated
+            if( curBlock->next != nullptr ) {
+                freeBlocksHead = curBlock->next; 
+            } else {
+                freeBlocksHead = (FreeBlock*)((char*)curBlock + N);
+                freeBlocksHead->size = curBlock->size - N;
+                freeBlocksHead->next = nullptr;  // here curBlock->next == nullptr
+            }
+        } else {
+            if( curBlock->size == N ) {
+                prevBlock->next = curBlock->next;
+            } else {
+                FreeBlock* newBlock = (FreeBlock*)((char*)curBlock + N);
+                newBlock->size = curBlock->size - N;
+                newBlock->next = curBlock->next;
+                prevBlock->next = newBlock;
+            }
+        }
+
+        nDescriptors++;
+        *((void**)new_desc) = (void*)((char**)curBlock);
+        if( enlargeTable ) {
+            // find the last free block
+            FreeBlock* lastBlock = freeBlocksHead;
+            while( lastBlock->next != nullptr )
             lastBlock = lastBlock->next;
-        lastBlock->size -= sizeof(void*);
+            // decrease last block size by size of one descriptor
+            lastBlock->size -= sizeof(void*);
+        }
+        // return Pointer containing pointer to descriptor inside
+        return Pointer((void**)new_desc);
     }
-    // return Pointer containing pointer to descriptor inside
-    return Pointer((void**)new_desc);
 }
 
 /**
