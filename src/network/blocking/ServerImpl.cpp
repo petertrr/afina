@@ -244,38 +244,39 @@ void ServerImpl::RunConnection(int client_socket) {
     // TODO: All connection work is here
     size_t buf_size = 256;
     char msg_buf[buf_size];
-    memset(msg_buf, buf_size, 0);
+    memset(msg_buf, 0, buf_size);
     int rval;
     size_t parsed = 0;
     uint32_t body_size;
     Afina::Protocol::Parser parser;
-    while( running.load() && (rval = read(client_socket, msg_buf, buf_size)) != 0 )
+    std::string command = "";
+    std::string args = "";
+    while( running.load() && (rval = read(client_socket, msg_buf, buf_size)) != 0 || command.size() > 0 )
     {
         if( rval < 0 ) {
             std::cout << "Reading stream error" << std::endl;
             break;
         }
-        std:: cout << "rval = " << rval << ", strlen(msg) = "
-            << strlen(msg_buf) << ", msg = " << msg_buf << std::endl;
-        if( parser.Parse(msg_buf, strlen(msg_buf), parsed) ) {
+        command += msg_buf;
+        bool parse_finished = false;
+        try {
+            parse_finished = parser.Parse(command, parsed);
+        } catch(...) {
+            std::string result = "ERROR\r\n";
+            if( send(client_socket, result.data(), result.size(), 0) <= 0 ) {
+                close(client_socket);
+                throw std::runtime_error("Socket send() failed");
+            }
+            break;
+        }
+        command.erase(0, parsed);
+        if( parse_finished ) {
             std::unique_ptr<Afina::Execute::Command> com_ptr = parser.Build(body_size);
-            std::cout << "Command name: " << parser.Name() << std::endl;
             std::string args;
             if( body_size > 0 ) {
-                std::cout << "Parsed: " << parsed << ", body_size: " << body_size << std::endl;
-                // read command argument
-            //    memset(msg_buf, buf_size, 0);
-            //    while( !parser.Parse(msg_buf, strlen(msg_buf), parsed) ) {
-            //        rval = read(client_socket, msg_buf + parsed - body_size, body_size);
-            //        if( rval < 0 ) {
-            //            std::cout << "Reading stream error" << std::endl;
-            //            break;
-            //        }
-            //    }
-            //    for( std::string s : parser.Keys() )
-            //        std::cout << "Key: " << s << std::endl;
-                args = std::string(msg_buf + parsed - body_size, body_size);
-                std::cout << "Args: " << args << std::endl;
+                // get command argument
+                args = command.substr(0, body_size);
+                command.erase(0, body_size + 2); // including /r/n
             }
             std::string result;
             try {
@@ -283,17 +284,16 @@ void ServerImpl::RunConnection(int client_socket) {
             } catch(...) {
                 result = "SERVER_ERROR";
             }
-            std::cout << "Result: " << result << std::endl;
+            result += "\r\n";
             if ( result.size() && send(client_socket, result.data(), result.size(), 0) <= 0 ) {
                 close(client_socket);
                 throw std::runtime_error("Socket send() failed");
             }
-            break;
+            parser.Reset();
+            parsed = 0;
         }
-        
+        memset(msg_buf, 0, buf_size);
     }
-    std::cout << "Closing connection, running = " << running.load()
-        << ", rval = " << rval << "..." << std::endl;
     close(client_socket);
 
     // Thread is about to stop, remove self from list of connections

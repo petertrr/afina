@@ -40,10 +40,16 @@ protected:
     /**
      * Methos is running for each connection
      */
-    void RunConnection();
+    void RunConnection(int client_socket);
 
 private:
     static void *RunAcceptorProxy(void *p);
+    static void *RunConnectionProxy(void *p);
+
+    struct workerArgs {
+        void * this_ptr;
+        int client_socket;
+    };
 
     // Atomic flag to notify threads when it is time to stop. Note that
     // flag must be atomic in order to safely publisj changes cross thread

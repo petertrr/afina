@@ -9,10 +9,15 @@ namespace Backend {
 bool MapBasedGlobalLockImpl::Put(const std::string &key, const std::string &value)
 {
     std::unique_lock<std::mutex> guard(_lock);
-    if( _order.size() + 1 > _max_size )
-        _order.pop_front();
+    if( _backend.find(key) == _backend.end() )
+    {
+        if( _order.size() + 1 > _max_size ) {
+            _backend.erase(_order.front());
+            _order.pop_front();
+        }
+        _order.push_back(key);
+    }
     _backend[key] = value;
-    _order.push_back(key);
     return true;
 }
 
@@ -20,13 +25,17 @@ bool MapBasedGlobalLockImpl::Put(const std::string &key, const std::string &valu
 bool MapBasedGlobalLockImpl::PutIfAbsent(const std::string &key, const std::string &value)
 {
     std::unique_lock<std::mutex> guard(_lock);
-    if( _backend.find(key) == _backend.end() )
+    //if( _backend.find(key) == _backend.end() )
+    if( _backend.count(key) == 0 )
     {
-        if( _order.size() + 1 > _max_size )
+        if( _order.size() + 1 > _max_size ) {
+            _backend.erase(_order.front());
             _order.pop_front();
-        _backend[key] = value;
+        }
         _order.push_back(key);
+        _backend[key] = value;
         return true;
+    //    return Put(key, value);
     }
     return false;
 }
@@ -50,11 +59,7 @@ bool MapBasedGlobalLockImpl::Delete(const std::string &key)
     {
         std::unique_lock<std::mutex> guard(_lock);
         _backend.erase(key);
-        for(auto it = _order.begin(); it != _order.end(); ++it)
-            if(*(it) == key) {
-                _order.erase(it);
-                break;
-            }
+        _order.remove(key);
         return true;
     }
     return false;
