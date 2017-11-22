@@ -3,6 +3,7 @@
 
 #include <memory>
 #include <pthread.h>
+#include <atomic>
 
 namespace Afina {
 
@@ -20,6 +21,10 @@ namespace NonBlocking {
 class Worker {
 public:
     Worker(std::shared_ptr<Afina::Storage> ps);
+    Worker(const Worker&) = delete;
+    Worker& operator = (const Worker&) = delete;
+    Worker(Worker&& w);
+    Worker& operator = (Worker&&) = default;
     ~Worker();
 
     /**
@@ -48,9 +53,18 @@ protected:
      * Method executing by background thread
      */
     void OnRun(void *args);
+    static void *OnRunWrapper(void *args);
 
 private:
+    std::shared_ptr<Afina::Storage> pStorage;
     pthread_t thread;
+    int server_socket;
+    std::atomic<bool> running;
+};
+
+struct args_t {
+    int socket;
+    void *this_ptr;
 };
 
 } // namespace NonBlocking
