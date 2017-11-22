@@ -58,6 +58,7 @@ private:
 
     // Thread that is accepting new connections
     pthread_t accept_thread;
+    int server_socket;
 
     // Maximum number of client allowed to exists concurrently
     // on server, permits access only from inside of accept_thread.

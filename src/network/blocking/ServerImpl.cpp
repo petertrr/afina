@@ -95,6 +95,7 @@ void ServerImpl::Start(uint32_t port, uint16_t n_workers) {
 void ServerImpl::Stop() {
     std::cout << "network debug: " << __PRETTY_FUNCTION__ << std::endl;
     running.store(false);
+    shutdown(server_socket, SHUT_RDWR);
 }
 
 // See Server.h
@@ -127,7 +128,8 @@ void ServerImpl::RunAcceptor() {
     // - Family: IPv4
     // - Type: Full-duplex stream (reliable)
     // - Protocol: TCP
-    int server_socket = socket(PF_INET, SOCK_STREAM, IPPROTO_TCP);
+    //int
+    server_socket = socket(PF_INET, SOCK_STREAM, IPPROTO_TCP);
     if (server_socket == -1) {
         throw std::runtime_error("Failed to open socket");
     }
@@ -176,36 +178,15 @@ void ServerImpl::RunAcceptor() {
 
         // TODO: Start new thread and process data from/to connection
         {
-            /*
-            // check if created threads are finished
-            if( connections.size() >= max_workers ) {
-                size_t prev_size = connections.size();
-                connections.erase(std::remove_if(connections.begin(), connections.end(),
-                    [](pthread_t x) {return pthread_kill(x, 0) != 0;}),
-                    connections.end());
-                std::cout << "Erasing " << (int)prev_size - (int)connections.size()
-                    << " finished threads..." << std::endl;
-            }
-            */
-
             if( connections.size() < max_workers ) {
                 pthread_t thread_id;
                 struct workerArgs wa;
                 wa.client_socket = client_socket;
                 wa.this_ptr = this;
                 pthread_create(&thread_id, NULL, RunConnectionProxy, (void*)&wa);
-            //    pthread_create(&thread_id, NULL, RunConnection, (void*)&client_socket);
-            //    connections.push_back(thread_id);
             } else {
                 close(client_socket);
             }
-//            std::string msg = "TODO: start new thread and process memcached protocol instead";
-//            if (send(client_socket, msg.data(), msg.size(), 0) <= 0) {
-//                close(client_socket);
-//                close(server_socket);
-//                throw std::runtime_error("Socket send() failed");
-//            }
-//            close(client_socket);
         } // TODO
     }
 
@@ -247,11 +228,9 @@ void ServerImpl::RunConnection(int client_socket) {
     memset(msg_buf, 0, buf_size);
     int rval;
     size_t parsed = 0;
-    uint32_t body_size;
     Afina::Protocol::Parser parser;
     std::string command = "";
-    std::string args = "";
-    while( running.load() && (rval = read(client_socket, msg_buf, buf_size)) != 0 || command.size() > 0 )
+    while( running.load() && ((rval = read(client_socket, msg_buf, buf_size)) != 0 || command.size() > 0) )
     {
         if( rval < 0 ) {
             std::cout << "Reading stream error" << std::endl;
@@ -270,10 +249,17 @@ void ServerImpl::RunConnection(int client_socket) {
             break;
         }
         command.erase(0, parsed);
+        parsed = 0;
         if( parse_finished ) {
+            uint32_t body_size;
             std::unique_ptr<Afina::Execute::Command> com_ptr = parser.Build(body_size);
             std::string args;
             if( body_size > 0 ) {
+                while( body_size + 2 > command.size() ) {
+                    rval = read(client_socket, msg_buf, buf_size);
+                    command += msg_buf;
+                    memset(msg_buf, 0, buf_size);
+                }
                 // get command argument
                 args = command.substr(0, body_size);
                 command.erase(0, body_size + 2); // including /r/n
