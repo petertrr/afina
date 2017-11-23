@@ -4,6 +4,8 @@
 #include <uv.h>
 #include <fstream>
 #include <unistd.h>
+#include <sys/epoll.h>
+#include <sys/signalfd.h>
 
 #include <cxxopts.hpp>
 
@@ -119,6 +121,27 @@ int main(int argc, char **argv) {
     // Init local loop. It will react to signals and performs some metrics collections. Each
     // subsystem is able to push metrics actively, but some metrics could be collected only
     // by polling, so loop here will does that work
+    int loop_epoll_fd = epoll_create(200);
+
+    // Init stop signal handlers
+    sigset_t stop_flag;
+    sigemptyset(&stop_flag);
+    sigaddset(&stop_flag, SIGTERM);
+    sigaddset(&stop_flag, SIGKILL);
+    sigaddset(&stop_flag, SIGINT);
+    if( sigprocmask(SIG_BLOCK, &stop_flag, NULL) == -1 )
+        throw std::runtime_error("Failed to sigprocmask in main event loop");
+    int stop_sig_fd = signalfd(-1, &stop_flag, 0);
+    if( stop_sig_fd == -1 )
+        throw std::runtime_error("Failed to create signalfd in main event loop");
+    
+    // Add signal handling to epoll context
+    epoll_event sig_event;
+    sig_event.data.ptr = &stop_sig_fd;
+    sig_event.events = EPOLLIN;
+    epoll_ctl(loop_epoll_fd, EPOLL_CTL_ADD, stop_sig_fd, &sig_event);
+
+/*
     uv_loop_t loop;
     uv_loop_init(&loop);
 
@@ -131,15 +154,31 @@ int main(int argc, char **argv) {
     uv_timer_init(&loop, &timer);
     timer.data = &app;
     uv_timer_start(&timer, timer_handler, 0, 5000);
-
+*/
     // Start services
     try {
         app.storage->Start();
-        app.server->Start(8080);
+        app.server->Start(8080, 10);
 
         // Freeze current thread and process events
         std::cout << "Application started" << std::endl;
-        uv_run(&loop, UV_RUN_DEFAULT);
+//        uv_run(&loop, UV_RUN_DEFAULT);
+        const int MAXEVENTS = 8;
+        struct epoll_event *loop_events = (struct epoll_event*)calloc(MAXEVENTS, sizeof(struct epoll_event));
+        bool loop_running = true;
+        while( loop_running )
+        {
+            int n = epoll_wait(loop_epoll_fd, loop_events, MAXEVENTS, -1);
+            if( n < 0)
+                throw std::runtime_error("Failed to epoll_wait in main event loop");
+            for(int i = 0; i < n; ++i)
+            {
+                if( &stop_sig_fd == loop_events[i].data.ptr ) {
+                    loop_running = false;
+                }
+            }
+        }
+        free(loop_events);
 
         // Stop services
         app.server->Stop();
