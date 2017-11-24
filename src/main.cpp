@@ -1,11 +1,12 @@
 #include <chrono>
 #include <iostream>
 #include <memory>
-#include <uv.h>
+//#include <uv.h>
 #include <fstream>
 #include <unistd.h>
 #include <sys/epoll.h>
 #include <sys/signalfd.h>
+#include <sys/timerfd.h>
 
 #include <cxxopts.hpp>
 
@@ -22,20 +23,6 @@ typedef struct {
     std::shared_ptr<Afina::Storage> storage;
     std::shared_ptr<Afina::Network::Server> server;
 } Application;
-
-// Handle all signals catched
-void signal_handler(uv_signal_t *handle, int signum) {
-    Application *pApp = static_cast<Application *>(handle->data);
-
-    std::cout << "Receive stop signal" << std::endl;
-    uv_stop(handle->loop);
-}
-
-// Called when it is time to collect passive metrics from services
-void timer_handler(uv_timer_t *handle) {
-    Application *pApp = static_cast<Application *>(handle->data);
-    std::cout << "Start passive metrics collection" << std::endl;
-}
 
 int main(int argc, char **argv) {
     // Build version
@@ -134,35 +121,37 @@ int main(int argc, char **argv) {
     int stop_sig_fd = signalfd(-1, &stop_flag, 0);
     if( stop_sig_fd == -1 )
         throw std::runtime_error("Failed to create signalfd in main event loop");
-    
+
     // Add signal handling to epoll context
     epoll_event sig_event;
     sig_event.data.ptr = &stop_sig_fd;
     sig_event.events = EPOLLIN;
     epoll_ctl(loop_epoll_fd, EPOLL_CTL_ADD, stop_sig_fd, &sig_event);
 
-/*
-    uv_loop_t loop;
-    uv_loop_init(&loop);
+    // Create timer for periodic debug information
+    int timer_fd = timerfd_create(CLOCK_MONOTONIC, TFD_NONBLOCK);
+    if( timer_fd < 0)
+        throw std::runtime_error("Failed to create timer in main event loop");
+    struct itimerspec new_value;
+    new_value.it_interval.tv_sec = 5;
+    new_value.it_interval.tv_nsec = 0;
+    new_value.it_value.tv_sec = 5;
+    new_value.it_value.tv_nsec = 0;
+    if( -1 == timerfd_settime(timer_fd, TFD_TIMER_ABSTIME, &new_value, NULL) )
+        throw std::runtime_error("Failed to set time on timer fd");
 
-    uv_signal_t sig;
-    uv_signal_init(&loop, &sig);
-    uv_signal_start(&sig, signal_handler, SIGTERM | SIGKILL);
-    sig.data = &app;
+    // Add timer fd to epoll context
+    epoll_event time_event;
+    time_event.data.ptr = &timer_fd;
+    time_event.events = EPOLLIN | EPOLLET;
+    epoll_ctl(loop_epoll_fd, EPOLL_CTL_ADD, timer_fd, &time_event);
 
-    uv_timer_t timer;
-    uv_timer_init(&loop, &timer);
-    timer.data = &app;
-    uv_timer_start(&timer, timer_handler, 0, 5000);
-*/
     // Start services
     try {
         app.storage->Start();
         app.server->Start(8080, 10);
 
-        // Freeze current thread and process events
         std::cout << "Application started" << std::endl;
-//        uv_run(&loop, UV_RUN_DEFAULT);
         const int MAXEVENTS = 8;
         struct epoll_event *loop_events = (struct epoll_event*)calloc(MAXEVENTS, sizeof(struct epoll_event));
         bool loop_running = true;
@@ -174,7 +163,14 @@ int main(int argc, char **argv) {
             for(int i = 0; i < n; ++i)
             {
                 if( &stop_sig_fd == loop_events[i].data.ptr ) {
+                    std::cout << "Receive stop signal" << std::endl;
                     loop_running = false;
+                } else if( &timer_fd == loop_events[i].data.ptr ) {
+                        uint64_t val = 0;
+                        int rval = read(timer_fd, &val, sizeof(uint64_t));
+                        if( rval > 0 ) {
+                            std::cout << "Start passive metrics collection" << std::endl;
+                    }
                 }
             }
         }
