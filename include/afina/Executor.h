@@ -26,7 +26,8 @@ class Executor {
         // Threadppol is stopped
         kStopped
     };
-
+    
+public:
     Executor(std::string name, int size);
     ~Executor();
 
