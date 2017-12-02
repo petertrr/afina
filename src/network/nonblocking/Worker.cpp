@@ -8,7 +8,6 @@
 #include <netinet/in.h>
 #include <unistd.h>
 
-//#include <errno.h>
 #include <cstring>
 #include <string>
 #include <algorithm>
@@ -23,12 +22,14 @@ namespace NonBlocking {
     
 // See Worker.h
 Worker::Worker(std::shared_ptr<Afina::Storage> ps) : pStorage(ps)
-{ }
+{
+    running.store(false);
+}
 
 Worker::Worker(Worker&& w) :
-    pStorage(w.pStorage)
-    , thread(w.thread)
-    , server_socket(w.server_socket)
+    pStorage(std::move(w.pStorage))
+    , thread(std::move(w.thread))
+    , server_socket(std::move(w.server_socket))
 {
     std::cout << "Entering move constructor\n";
     running.store(w.running.load());
@@ -98,7 +99,6 @@ void Worker::OnRun(void *args) {
     socklen_t clientlen = sizeof(clientaddr);
     unsigned int MAXEVENTS = 20;
     struct epoll_event *events = (epoll_event*)calloc(MAXEVENTS, sizeof(struct epoll_event));
-    bool need_exit = false;
     while( running.load() )
     {
         int n = epoll_wait(epoll_fd, events, MAXEVENTS, -1);
@@ -114,14 +114,12 @@ void Worker::OnRun(void *args) {
                 int client_socket = accept(server_socket, (struct sockaddr *)&clientaddr, &clientlen);
                 if (-1 == client_socket) {
                     if( errno == EINVAL || errno == EAGAIN || errno == EWOULDBLOCK ) {
-                        need_exit = true;
+                        std::cout << "Accept returned EINVAL\n";
                         break;
                     } else {
                         throw std::runtime_error("Accept failed");
                     }
                 }
-                if( need_exit )
-                    break;
                 make_socket_non_blocking(client_socket);
             
                 // 4. Add connections to the local context
@@ -129,7 +127,7 @@ void Worker::OnRun(void *args) {
                 // Do not forget to use EPOLLEXCLUSIVE flag when register socket
                 // for events to avoid thundering herd type behavior.
                 struct epoll_event client_conn_event;
-                client_conn_event.events = EPOLLIN | EPOLLEXCLUSIVE;
+                client_conn_event.events = EPOLLIN | EPOLLOUT;
                 client_conn_event.data.ptr = (void*)&client_socket;
                 if (-1 == epoll_ctl(epoll_fd, EPOLL_CTL_ADD, client_socket, &client_conn_event)) {
                     throw std::runtime_error("Failed to add an EPOLLIN event for client socket.");
@@ -202,7 +200,6 @@ void Worker::OnRun(void *args) {
             }
         }
     }
-    pthread_exit(0);
 }
 
 } // namespace NonBlocking
