@@ -110,6 +110,7 @@ public:
      * @param arguments to be passed to the main coroutine
      */
     template <typename... Ta> void start(void (*main)(Ta...), Ta &&... args) {
+//        std::cout << "coroutine debug: " << __PRETTY_FUNCTION__ << std::endl;
         // To acquire stack begin, create variable on stack and remember its address
         char StackStartsHere;
         this->StackBottom = &StackStartsHere;
@@ -136,6 +137,7 @@ public:
      * errors function returns -1
      */
     template <typename... Ta> void *run(void (*func)(Ta...), Ta &&... args) {
+//        std::cout << "coroutine debug: " << __PRETTY_FUNCTION__ << std::endl;
         if (this->StackBottom == 0) {
             // Engine wasn't initialized yet
             return nullptr;
